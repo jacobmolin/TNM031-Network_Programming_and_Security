@@ -1,0 +1,225 @@
+package lab3.server;
+// An example class that uses the secure server socket class
+
+import java.io.*;
+import javax.net.ssl.*;
+import java.security.*;
+import java.util.StringTokenizer;
+
+public class SSLServer {
+	private int port;
+	// This is not a reserved port number
+	static final int DEFAULT_PORT = 8189;
+	static final String KEYSTORE = "src/tnm031_lab3/server/LIUkeystore.ks";
+	static final String TRUSTSTORE = "src/tnm031_lab3/server/LIUtruststore.ks";
+	static final String KEYSTOREPASS = "123456";
+	static final String TRUSTSTOREPASS = "abcdef";
+
+	/**
+	 * Constructor
+	 * 
+	 * @param port The port where the server will listen for requests
+	 */
+	SSLServer(int port) {
+		this.port = port;
+	}
+
+	/** The method that does the work for the class */
+	public void run() {
+		// System.out.println("Working Directory = " + System.getProperty("user.dir"));
+
+		try {
+			KeyStore ks = KeyStore.getInstance("JCEKS");
+			ks.load(new FileInputStream(KEYSTORE), KEYSTOREPASS.toCharArray());
+
+			KeyStore ts = KeyStore.getInstance("JCEKS");
+			ts.load(new FileInputStream(TRUSTSTORE), TRUSTSTOREPASS.toCharArray());
+
+			KeyManagerFactory kmf = KeyManagerFactory.getInstance("SunX509");
+			kmf.init(ks, KEYSTOREPASS.toCharArray());
+
+			TrustManagerFactory tmf = TrustManagerFactory.getInstance("SunX509");
+			tmf.init(ts);
+
+			SSLContext sslContext = SSLContext.getInstance("TLS");
+			sslContext.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);
+			SSLServerSocketFactory sslServerFactory = sslContext.getServerSocketFactory();
+			SSLServerSocket sss = (SSLServerSocket) sslServerFactory.createServerSocket(port);
+			sss.setNeedClientAuth(true);
+			sss.setEnabledCipherSuites(sss.getSupportedCipherSuites());
+
+			System.out.println("\n>>>> SecureAdditionServer: active ");
+			SSLSocket incoming = (SSLSocket) sss.accept();
+
+			BufferedReader in = new BufferedReader(new InputStreamReader(incoming.getInputStream()));
+			PrintWriter out = new PrintWriter(incoming.getOutputStream(), true);
+
+			int option = Integer.parseInt(in.readLine());
+			String fileName = new String();
+			String fileContent = new String();
+
+			switch (option) {
+				// Upload
+				case 1:
+					System.out.println("\n>>>> Uploading to server...");
+					fileName = in.readLine();
+					fileContent = read_content_from_client(in);
+					if (fileContent != "") {
+						save_file(fileName, fileContent);
+					} else {
+						System.out.println("Something went wrong when uploading :(");
+					}
+					break;
+				// Download file
+				case 2:
+					System.out.println("\n>>>> Downloading from server...");
+					fileName = in.readLine();
+					send_file(fileName, out);
+					break;
+				// Delete file
+				case 3:
+					System.out.println("\n>>>> Deleting on server...");
+					fileName = in.readLine();
+					delete_file(fileName);
+					break;
+				// Connection test
+				case 4:
+					connection_test(incoming, in, out);
+					break;
+				// Exit / Close connection
+				case 5:
+					System.out.println("\n>>>> Closing connection...");
+					incoming.close();
+					break;
+				default:
+					System.out.println("\n>>>> Something went wrong on server-side\n");
+					break;
+			}
+
+			incoming.close();
+
+		} catch (Exception x) {
+			System.out.println(x);
+			x.printStackTrace();
+		}
+	}
+
+	public static void connection_test(SSLSocket incoming, BufferedReader in, PrintWriter out) throws IOException {
+		String str;
+		while (!(str = in.readLine()).equals("")) {
+			double result = 0;
+			StringTokenizer st = new StringTokenizer(str);
+			try {
+				while (st.hasMoreTokens()) {
+					Double d = new Double(st.nextToken());
+					result += d.doubleValue();
+				}
+				out.println("The result is ");
+				out.println(result);
+			} catch (NumberFormatException nfe) {
+				out.println("Sorry, your list contains an invalid number");
+			}
+		}
+	}
+
+	public static void save_file(String fileName, String content) {
+		File file = new File("src/tnm031_lab3/server/" + fileName);
+
+		try {
+			if (!file.exists()) {
+//				FileWriter fw = new FileWriter(file);
+				PrintWriter writer = new PrintWriter(new FileWriter(file));
+				writer.print(content);
+				writer.close();
+				System.out.println("\n>>>> \'" + fileName + "\' uploaded to server");
+			} else {
+				throw new Exception("File already exists on server! Choose a different name?");
+			}
+		} catch (Exception e) {
+			System.out.println("The file \'" + fileName + "\' couldn't be saved at server. Exception: " + e.getMessage());
+			e.printStackTrace();
+		}
+	}
+
+	private String read_content_from_client(BufferedReader in) {
+		try {
+			StringBuilder builder = new StringBuilder();
+			String line;
+			
+			while ((line = in.readLine()) != null) {				
+				builder.append(line);
+				builder.append(System.lineSeparator()); // Add '\n' after line
+			}
+			return builder.toString();
+		} catch (Exception e) {
+			System.out.println("The content stream couldn't be read at server. Exception: " + e.getMessage());
+			e.printStackTrace();
+			return "";
+		}
+	}
+
+	private void send_file(String fileName, PrintWriter out) {
+		try {
+			// Read file
+			String fileContent = read_file("src/tnm031_lab3/server/" + fileName);
+
+			// Send file
+			System.out.println("\n>>>> Sending file \'" + fileName + "\' to CLIENT");
+			out.println(fileContent);
+			out.close();
+		} catch (Exception e) {
+			System.out.println("An error occured while trying to download the file. The error:");
+			System.out.println(e);
+			e.printStackTrace();
+		}
+	}
+
+	private String read_file(String fileName) {
+		try {
+			BufferedReader br = new BufferedReader(new FileReader(fileName));
+			StringBuilder builder = new StringBuilder();
+			String line;
+
+			while ((line = br.readLine()) != null) {
+				builder.append(line);
+				builder.append(System.lineSeparator()); // Add '\n' after line
+			}
+			br.close();
+			return builder.toString();
+		} catch (Exception e) {
+			System.out.println("The file " + fileName + " couldn't be read. Exception: " + e.getMessage());
+			e.printStackTrace();
+			return "";
+		}
+	}
+
+	private void delete_file(String fileName) {
+		File file = new File("src/tnm031_lab3/server/" + fileName);
+
+		try {
+			if (file.exists()) {
+				file.delete();
+				System.out.println("The file \'" + fileName + "\' was deleted.");
+			} else {
+				throw new Exception("The file \'" + fileName + "\' doesn't exist on server.");
+			}
+		} catch (Exception e) {
+			System.out.println("The file " + fileName + " couldn't be deleted. Exception: " + e.getMessage());
+			e.printStackTrace();
+		}
+	}
+
+	/**
+	 * The test method for the class
+	 * 
+	 * @param args[0] Optional port number in place of the default
+	 */
+	public static void main(String[] args) {
+		int port = DEFAULT_PORT;
+		if (args.length > 0) {
+			port = Integer.parseInt(args[0]);
+		}
+		SSLServer addServe = new SSLServer(port);
+		addServe.run();
+	}
+}

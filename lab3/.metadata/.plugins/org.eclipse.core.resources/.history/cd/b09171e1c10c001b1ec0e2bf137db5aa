@@ -1,0 +1,269 @@
+package lab3.client;
+// A client-side class that uses a secure TCP/IP socket
+
+import java.io.*;
+import java.net.*;
+import java.security.KeyStore;
+import javax.net.ssl.*;
+
+public class SecureAdditionClient {
+	private InetAddress host;
+	private int port;
+	// This is not a reserved port number
+	static final int DEFAULT_PORT = 8189;
+	static final String KEYSTORE = "src/tnm031_lab3/client/LIUkeystore.ks";
+	static final String TRUSTSTORE = "src/tnm031_lab3/client/LIUtruststore.ks";
+	static final String KEYSTOREPASS = "123456";
+	static final String TRUSTSTOREPASS = "abcdef";
+
+	// Constructor @param host Internet address of the host where the server is
+	// located
+	// @param port Port number on the host where the server is listening
+	public SecureAdditionClient(InetAddress host, int port) {
+		this.host = host;
+		this.port = port;
+	}
+
+	// The method used to start a client object
+	public void run() {
+		try {
+			KeyStore ks = KeyStore.getInstance("JCEKS");
+			ks.load(new FileInputStream(KEYSTORE), KEYSTOREPASS.toCharArray());
+
+			KeyStore ts = KeyStore.getInstance("JCEKS");
+			ts.load(new FileInputStream(TRUSTSTORE), TRUSTSTOREPASS.toCharArray());
+
+			KeyManagerFactory kmf = KeyManagerFactory.getInstance("SunX509");
+			kmf.init(ks, KEYSTOREPASS.toCharArray());
+
+			TrustManagerFactory tmf = TrustManagerFactory.getInstance("SunX509");
+			tmf.init(ts);
+
+			SSLContext sslContext = SSLContext.getInstance("TLS");
+			sslContext.init(kmf.getKeyManagers(), tmf.getTrustManagers(), null);
+			SSLSocketFactory sslFact = sslContext.getSocketFactory();
+			SSLSocket client = (SSLSocket) sslFact.createSocket(host, port);
+			client.setEnabledCipherSuites(client.getSupportedCipherSuites());	// TLS_AES_256_GCM_SHA384
+			System.out.println("\n>>>> SSL/TLS handshake completed");
+
+			BufferedReader socketIn = new BufferedReader(new InputStreamReader(client.getInputStream()));
+			PrintWriter socketOut = new PrintWriter(client.getOutputStream(), true);
+			System.out.println(">>>> Connected...");
+
+			int option = 0;
+
+			// Menu
+			// while (option != 4) {
+			show_menu();
+			option = Integer.parseInt((new BufferedReader(new InputStreamReader(System.in))).readLine().trim());
+			// socketOut.println(option);
+
+			switch (option) {
+				// Upload file
+				case 1:
+					upload_file(socketOut);
+					break;
+				// Download file
+				case 2:
+					download_file(socketIn, socketOut);
+					break;
+				// Delete file
+				case 3:
+					delete_file(socketOut);
+					break;
+				// Connection test
+				case 4:
+					connection_test(socketIn, socketOut);
+					break;
+				// Exit / Close connection
+				case 5:
+					System.out.println("Exiting...");
+					socketOut.println(option);
+					break;
+				default:
+					System.out.println("Please choose 1-4");
+					break;
+			}
+			// }
+		} catch (Exception x) {
+			System.out.println(x);
+			x.printStackTrace();
+		}
+	}
+
+	private void show_menu() {
+		System.out.println("\n------ Menu ------");
+		System.out.println("Select an option (1, 2, 3, 4)\n1. Upload file\n2. Download file\n"
+				+ "3. Delete file\n4. Connection test\n5. Exit\n\nSelection: ");
+	}
+
+	private void connection_test(BufferedReader socketIn, PrintWriter socketOut) {
+		try {
+			String numbers = "1.2 3.4 5.6";
+			System.out.println(">>>> Sending the numbers " + numbers + " to SERVER");
+
+			socketOut.println("4"); // send option
+			socketOut.println(numbers);
+			System.out.print(socketIn.readLine());
+
+			Double result = Double.parseDouble(socketIn.readLine());
+			System.out.print(": " + result + "\n");
+			
+			if (result == 10.2) {
+				System.out.println("Connection test successful!");
+			} else {
+				System.out.println("Connection test failed!");
+			}
+			socketOut.println("");
+		} catch (Exception x) {
+			System.out.println(x);
+			x.printStackTrace();
+		}
+	}
+
+	private void upload_file(PrintWriter socketOut) {
+		System.out.println("Name of file to upload: ");
+		try {
+			// File name
+			// String fileName = (new BufferedReader(new
+			// InputStreamReader(System.in))).readLine();
+			BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+			String fileName = br.readLine();
+			br.close();
+
+			// Read file
+			String fileContent = read_file("src/tnm031_lab3/client/" + fileName);
+
+			// Send file
+			System.out.println("\n>>>> Uploading file \'" + fileName + "\' to SERVER");
+			socketOut.println("1"); // send option
+			socketOut.println(fileName);
+			socketOut.println(fileContent);
+			socketOut.close();
+		} catch (Exception e) {
+			System.out.println("An error occured while trying to upload the file. The error:");
+			System.out.println(e);
+			e.printStackTrace();
+		}
+	}
+
+	private void download_file(BufferedReader socketIn, PrintWriter socketOut) {
+		System.out.println("Name of file to download: ");
+		try {
+			// File name
+			// String fileName = (new BufferedReader(new
+			// InputStreamReader(System.in))).readLine();
+			BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+			String fileName = br.readLine();
+			br.close();
+
+			// Send file name
+			socketOut.println("2"); // send option
+			socketOut.println(fileName);
+
+			// Receive content
+			String fileContent = read_content_from_server(socketIn);
+
+			// Save file
+			save_file(fileName, fileContent);
+			socketOut.close();
+			System.out.println("\n>>>> \'" + fileName + "\' dowloaded to client");
+		} catch (Exception e) {
+			System.out.println("An error occured while trying to upload the file. The error:");
+			System.out.println(e);
+			e.printStackTrace();
+		}
+	}
+
+	private String read_content_from_server(BufferedReader in) {
+		try {
+			StringBuilder builder = new StringBuilder();
+			String line;
+			
+			while ((line = in.readLine()) != null) {
+				builder.append(line);
+				builder.append(System.lineSeparator()); // Add '\n' after line
+			}
+			return builder.toString();
+		} catch (Exception e) {
+			System.out.println("The file couldn't be read at server. Exception: " + e.getMessage());
+			e.printStackTrace();
+			return "";
+		}
+	}
+
+	public static void save_file(String fileName, String content) {
+		File file = new File("src/tnm031_lab3/client/" + fileName);
+
+		try {
+			if (!file.exists()) {
+				FileWriter fw = new FileWriter(file);
+				fw.write(content);
+				fw.close();
+			} else {
+				throw new Exception("File already exists at client! Choose a different name?");
+			}
+		} catch (Exception e) {
+			System.out
+					.println("The file \'" + fileName + "\' couldn't be saved at server. Exception: " + e.getMessage());
+			e.printStackTrace();
+		}
+	}
+
+	private String read_file(String fileName) {
+		try {
+			BufferedReader br = new BufferedReader(new FileReader(fileName));
+			StringBuilder builder = new StringBuilder();
+			String line;
+
+			while ((line = br.readLine()) != null) {
+				builder.append(line);
+				builder.append(System.lineSeparator()); // Add '\n' after line
+			}
+			br.close();
+			return builder.toString();
+		} catch (Exception e) {
+			System.out.println("The file " + fileName + " couldn't be read. Exception: " + e.getMessage());
+			e.printStackTrace();
+			return "";
+		}
+	}
+
+	private void delete_file(PrintWriter socketOut) {
+		System.out.println("Name of file to delete: ");
+		try {
+			// File name
+			// String fileName = (new BufferedReader(new
+			// InputStreamReader(System.in))).readLine();
+			BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+			String fileName = br.readLine();
+			br.close();
+
+			socketOut.println("3"); // send option
+			socketOut.println(fileName);
+		} catch (Exception e) {
+			System.out.println("An error occured while trying to delete the file. The error:");
+			System.out.println(e);
+			e.printStackTrace();
+		}
+	}
+
+	// The test method for the class @param args Optional port number and host name
+	public static void main(String[] args) {
+		try {
+			InetAddress host = InetAddress.getLocalHost();
+			int port = DEFAULT_PORT;
+			if (args.length > 0) {
+				port = Integer.parseInt(args[0]);
+			}
+			if (args.length > 1) {
+				host = InetAddress.getByName(args[1]);
+			}
+			SSLClient addClient = new SSLClient(host, port);
+			addClient.run();
+		} catch (UnknownHostException uhx) {
+			System.out.println(uhx);
+			uhx.printStackTrace();
+		}
+	}
+}
